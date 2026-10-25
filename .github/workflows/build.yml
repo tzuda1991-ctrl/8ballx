@@ -13,13 +13,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Check Repo Structure & Fix Files
+      - name: Auto-Fix Project Structure & Gradle Files
         run: |
-          echo "=== AAPKE REPO MEIN YEH FILES HAIN ==="
+          echo "=== CURRENT FILES IN REPO ==="
           find . -maxdepth 4 -not -path '*/.*'
-          echo "======================================"
+          echo "============================="
 
-          # 1. Ensure settings.gradle exists and includes :app
+          # 1. settings.gradle banayein
           cat << 'EOF' > settings.gradle
           pluginManagement {
               repositories {
@@ -39,31 +39,69 @@ jobs:
           include ':app'
           EOF
 
-          # 2. Ensure root build.gradle exists
-          if [ ! -f "build.gradle" ] && [ ! -f "build.gradle.kts" ]; then
-            cat << 'EOF' > build.gradle
+          # 2. Root build.gradle banayein (AGP 8.1.2)
+          cat << 'EOF' > build.gradle
           plugins {
               id 'com.android.application' version '8.1.2' apply false
           }
           EOF
+
+          # 3. Agar AndroidManifest.xml bahar pada hai, toh use sahi jagah move karein
+          mkdir -p app/src/main
+          if [ -f "AndroidManifest.xml" ] && [ ! -f "app/src/main/AndroidManifest.xml" ]; then
+            echo "Moving AndroidManifest.xml to app/src/main/..."
+            mv AndroidManifest.xml app/src/main/
           fi
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
+          # 4. Agar Java files bahar ya galat jagah padi hain, toh unhe सही package folder mein move karein
+          for javafile in $(find . -maxdepth 2 -name "*.java"); do
+            pkg=$(grep -E "^package " "$javafile" | head -n 1 | sed -E 's/package ([^;]+);/\1/' | tr '.' '/' | tr -d '\r ')
+            if [ -n "$pkg" ]; then
+              mkdir -p "app/src/main/java/$pkg"
+              mv "$javafile" "app/src/main/java/$pkg/"
+              echo "Moved $javafile to app/src/main/java/$pkg/"
+            fi
+          done
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: '8.4'
+          # 5. Agar app/build.gradle missing hai या खाली hai, toh automatic banayein
+          if [ ! -f "app/build.gradle" ] && [ ! -f "app/build.gradle.kts" ]; then
+            echo "app/build.gradle missing! Creating automatically..."
+            
+            # Manifest ya Java file se package name निकाले
+            PKG_NAME=$(grep -oP 'package="\K[^"]+' app/src/main/AndroidManifest.xml 2>/dev/null || true)
+            if [ -z "$PKG_NAME" ]; then
+              FIRST_JAVA=$(find app/src/main/java -name "*.java" | head -n 1)
+              if [ -n "$FIRST_JAVA" ]; then
+                PKG_NAME=$(grep -E "^package " "$FIRST_JAVA" | head -n 1 | sed -E 's/package ([^;]+);/\1/' | tr -d '\r ')
+              fi
+            fi
+            if [ -z "$PKG_NAME" ]; then
+              PKG_NAME="com.example.myapp"
+            fi
+            echo "Detected Package Name: $PKG_NAME"
 
-      - name: Build Debug APK
-        run: gradle :app:assembleDebug --stacktrace
+            cat << EOF > app/build.gradle
+          plugins {
+              id 'com.android.application'
+          }
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          android {
+              namespace '$PKG_NAME'
+              compileSdk 34
+
+              defaultConfig {
+                  applicationId "$PKG_NAME"
+                  minSdk 24
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+
+          dependencies {
+              
