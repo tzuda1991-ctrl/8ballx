@@ -13,95 +13,49 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Auto-Fix Project Structure & Gradle Files
+      - name: Create Missing Gradle Files
         run: |
-          echo "=== CURRENT FILES IN REPO ==="
-          find . -maxdepth 4 -not -path '*/.*'
-          echo "============================="
+          # 1. settings.gradle set karein
+          printf "pluginManagement {\n    repositories {\n        google()\n        mavenCentral()\n        gradlePluginPortal()\n    }\n}\ndependencyResolutionManagement {\n    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)\n    repositories {\n        google()\n        mavenCentral()\n    }\n}\nrootProject.name = 'MyApp'\ninclude ':app'\n" > settings.gradle
 
-          # 1. settings.gradle banayein
-          cat << 'EOF' > settings.gradle
-          pluginManagement {
-              repositories {
-                  google()
-                  mavenCentral()
-                  gradlePluginPortal()
-              }
-          }
-          dependencyResolutionManagement {
-              repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-          }
-          rootProject.name = "MyApp"
-          include ':app'
-          EOF
+          # 2. Root build.gradle set karein
+          printf "plugins {\n    id 'com.android.application' version '8.1.2' apply false\n}\n" > build.gradle
 
-          # 2. Root build.gradle banayein (AGP 8.1.2)
-          cat << 'EOF' > build.gradle
-          plugins {
-              id 'com.android.application' version '8.1.2' apply false
-          }
-          EOF
-
-          # 3. Agar AndroidManifest.xml bahar pada hai, toh use sahi jagah move karein
-          mkdir -p app/src/main
-          if [ -f "AndroidManifest.xml" ] && [ ! -f "app/src/main/AndroidManifest.xml" ]; then
-            echo "Moving AndroidManifest.xml to app/src/main/..."
-            mv AndroidManifest.xml app/src/main/
+          # 3. Java file ya Manifest se Package Name nikalein
+          PKG_NAME=$(grep -oP 'package="\K[^"]+' app/src/main/AndroidManifest.xml 2>/dev/null || true)
+          if [ -z "$PKG_NAME" ]; then
+            FIRST_JAVA=$(find app/src/main/java -name "*.java" | head -n 1)
+            if [ -n "$FIRST_JAVA" ]; then
+              PKG_NAME=$(grep -E "^package " "$FIRST_JAVA" | head -n 1 | sed -E 's/package ([^;]+);/\1/' | tr -d '\r ')
+            fi
           fi
+          if [ -z "$PKG_NAME" ]; then
+            PKG_NAME="com.example.myapp"
+          fi
+          echo "Detected Package Name: $PKG_NAME"
 
-          # 4. Agar Java files bahar ya galat jagah padi hain, toh unhe सही package folder mein move karein
-          for javafile in $(find . -maxdepth 2 -name "*.java"); do
-            pkg=$(grep -E "^package " "$javafile" | head -n 1 | sed -E 's/package ([^;]+);/\1/' | tr '.' '/' | tr -d '\r ')
-            if [ -n "$pkg" ]; then
-              mkdir -p "app/src/main/java/$pkg"
-              mv "$javafile" "app/src/main/java/$pkg/"
-              echo "Moved $javafile to app/src/main/java/$pkg/"
-            fi
-          done
+          # 4. Missing app/build.gradle banayein
+          printf "plugins {\n    id 'com.android.application'\n}\n\nandroid {\n    namespace '$PKG_NAME'\n    compileSdk 34\n\n    defaultConfig {\n        applicationId '$PKG_NAME'\n        minSdk 24\n        targetSdk 34\n        versionCode 1\n        versionName '1.0'\n    }\n\n    compileOptions {\n        sourceCompatibility JavaVersion.VERSION_17\n        targetCompatibility JavaVersion.VERSION_17\n    }\n}\n\ndependencies {\n    implementation 'androidx.appcompat:appcompat:1.6.1'\n    implementation 'com.google.android.material:material:1.11.0'\n    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'\n}\n" > app/build.gradle
 
-          # 5. Agar app/build.gradle missing hai या खाली hai, toh automatic banayein
-          if [ ! -f "app/build.gradle" ] && [ ! -f "app/build.gradle.kts" ]; then
-            echo "app/build.gradle missing! Creating automatically..."
-            
-            # Manifest ya Java file se package name निकाले
-            PKG_NAME=$(grep -oP 'package="\K[^"]+' app/src/main/AndroidManifest.xml 2>/dev/null || true)
-            if [ -z "$PKG_NAME" ]; then
-              FIRST_JAVA=$(find app/src/main/java -name "*.java" | head -n 1)
-              if [ -n "$FIRST_JAVA" ]; then
-                PKG_NAME=$(grep -E "^package " "$FIRST_JAVA" | head -n 1 | sed -E 's/package ([^;]+);/\1/' | tr -d '\r ')
-              fi
-            fi
-            if [ -z "$PKG_NAME" ]; then
-              PKG_NAME="com.example.myapp"
-            fi
-            echo "Detected Package Name: $PKG_NAME"
+          echo "Created app/build.gradle successfully!"
+          cat app/build.gradle
 
-            cat << EOF > app/build.gradle
-          plugins {
-              id 'com.android.application'
-          }
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
 
-          android {
-              namespace '$PKG_NAME'
-              compileSdk 34
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.4'
 
-              defaultConfig {
-                  applicationId "$PKG_NAME"
-                  minSdk 24
-                  targetSdk 34
-                  versionCode 1
-                  versionName "1.0"
-              }
+      - name: Build Debug APK
+        run: gradle :app:assembleDebug
 
-              compileOptions {
-                  sourceCompatibility JavaVersion.VERSION_17
-                  targetCompatibility JavaVersion.VERSION_17
-              }
-          }
-
-          dependencies {
-              
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
