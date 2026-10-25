@@ -35,9 +35,8 @@ jobs:
           if [ -z "$PKG_NAME" ]; then
             PKG_NAME="com.vip.tz"
           fi
-          echo "Detected Package Name: $PKG_NAME"
 
-          # 5. Missing strings.xml aur styles.xml banayein (app_name aur AppTheme ke liye)
+          # 5. Missing strings.xml aur styles.xml banayein
           mkdir -p app/src/main/res/values
           if [ ! -f "app/src/main/res/values/strings.xml" ]; then
             printf "<resources>\n    <string name=\"app_name\">8BallX</string>\n</resources>\n" > app/src/main/res/values/strings.xml
@@ -47,7 +46,12 @@ jobs:
             printf "<resources>\n    <style name=\"AppTheme\" parent=\"Theme.AppCompat.Light.NoActionBar\" />\n</resources>\n" > app/src/main/res/values/styles.xml
           fi
 
-          # 6. Agar Manifest mein @mipmap/ic_launcher ya @drawable/ic_launcher hai aur file nahi hai, toh built-in icon lagayein
+          # 6. Accessibility XML mein android:flags ko android:accessibilityFlags se fix karein
+          if [ -f "app/src/main/res/xml/accessibility_service_config.xml" ]; then
+            sed -i 's/android:flags=/android:accessibilityFlags=/g' app/src/main/res/xml/accessibility_service_config.xml
+          fi
+
+          # 7. Missing launcher icon fix karein
           if [ -f "app/src/main/AndroidManifest.xml" ]; then
             if [ ! -d "app/src/main/res/mipmap-hdpi" ] && [ ! -d "app/src/main/res/mipmap-anydpi-v26" ]; then
               sed -i 's/@mipmap\/ic_launcher_round/@android:drawable\/sym_def_app_icon/g' app/src/main/AndroidManifest.xml
@@ -55,7 +59,7 @@ jobs:
             fi
           fi
 
-          # 7. app/build.gradle banayein
+          # 8. app/build.gradle banayein
           printf "plugins {\n    id 'com.android.application'\n}\n\nandroid {\n    namespace '$PKG_NAME'\n    compileSdk 34\n\n    defaultConfig {\n        applicationId '$PKG_NAME'\n        minSdk 24\n        targetSdk 34\n        versionCode 1\n        versionName '1.0'\n    }\n\n    compileOptions {\n        sourceCompatibility JavaVersion.VERSION_17\n        targetCompatibility JavaVersion.VERSION_17\n    }\n}\n\ndependencies {\n    implementation 'androidx.appcompat:appcompat:1.6.1'\n    implementation 'com.google.android.material:material:1.11.0'\n    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'\n}\n" > app/build.gradle
 
       - name: Set up JDK 17
